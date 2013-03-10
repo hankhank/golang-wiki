@@ -6,6 +6,7 @@ package main
 
 import (
   "fmt"
+  "bytes"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -31,13 +32,35 @@ func loadPage(title string) (*Page, error) {
 	return &Page{Title: title, Body: body}, nil
 }
 
+var linkMatcher = regexp.MustCompile(`\[[a-zA-Z0-9]+\]`)
+
+func replaceLinks(match []byte) []byte {
+  last := len(match) - 1
+  page := match[1:last]
+
+  var w bytes.Buffer
+  err := templates.ExecuteTemplate(&w, "link.html", string(page))
+  if err != nil {
+    return match
+  }
+  return []byte(w.String())
+}
+
 func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
 	p, err := loadPage(title)
 	if err != nil {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
 		return
 	}
-	renderTemplate(w, "view", p)
+
+  var output bytes.Buffer
+  err = templates.ExecuteTemplate(&output, "view.html", p)
+  if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+  }
+
+  w.Write(linkMatcher.ReplaceAllFunc(output.Bytes(), replaceLinks))
 }
 
 func editHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -45,7 +68,10 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	if err != nil {
 		p = &Page{Title: title}
 	}
-	renderTemplate(w, "edit", p)
+  err = templates.ExecuteTemplate(w, "edit.html", p)
+  if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+  }
 }
 
 func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -59,14 +85,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
-var templates = template.Must(template.ParseFiles("tmpl/edit.html", "tmpl/view.html"))
-
-func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
-	err := templates.ExecuteTemplate(w, tmpl+".html", p)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
+var templates = template.Must(template.ParseFiles("tmpl/edit.html", "tmpl/view.html", "tmpl/link.html"))
 
 var titleValidator = regexp.MustCompile("^[a-zA-Z0-9]+$")
 
