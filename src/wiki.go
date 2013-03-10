@@ -68,19 +68,20 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	}
 }
 
-const lenPath = len("/view/")
-
 var titleValidator = regexp.MustCompile("^[a-zA-Z0-9]+$")
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		title := r.URL.Path[lenPath:]
-		if !titleValidator.MatchString(title) {
-			http.NotFound(w, r)
-			return
-		}
-		fn(w, r, title)
+func handleFunc (path string, fn func(http.ResponseWriter, *http.Request, string)) {
+  lenPath := len(path)
+  handler := func(w http.ResponseWriter, r *http.Request) {
+    title := r.URL.Path[lenPath:]
+    if !titleValidator.MatchString(title) {
+      http.NotFound(w, r)
+      return
+    }
+    fn(w, r, title)
 	}
+
+  http.HandleFunc(path, handler)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
@@ -90,8 +91,8 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
   fmt.Println("starting")
   http.HandleFunc("/", rootHandler)
-	http.HandleFunc("/view/", makeHandler(viewHandler))
-	http.HandleFunc("/edit/", makeHandler(editHandler))
-	http.HandleFunc("/save/", makeHandler(saveHandler))
+  handleFunc("/view/", viewHandler)
+  handleFunc("/edit/", editHandler)
+  handleFunc("/save/", saveHandler)
 	http.ListenAndServe(":8080", nil)
 }
