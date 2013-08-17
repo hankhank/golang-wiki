@@ -82,12 +82,12 @@ var templates = template.Must(template.ParseFiles("tmpl/home.html", "tmpl/wegoit
 //}
 
 type HomePage struct {
-    requestUri string
+    RequestUri string
 }
 
 func addRootHandler(uri string) {
     homePage := new(bytes.Buffer)
-    err:=templates.ExecuteTemplate(homePage, "home.html", HomePage{requestUri: uri})
+    err:=templates.ExecuteTemplate(homePage, "home.html", HomePage{RequestUri: uri})
     fmt.Println(err)
     handler := func(w http.ResponseWriter, r *http.Request) {
         io.Copy(w, homePage)
