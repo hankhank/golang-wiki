@@ -4,5 +4,5 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 cd $DIR/src
-exec go run wiki.go
+exec go run rsvpme2.go
 
