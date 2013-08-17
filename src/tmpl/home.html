@@ -1,5 +1,9 @@
 <h1>RSVP ME</h1>
 
-<form action="{{.requestUri}}" method="get">
-    Event URL: <input type="text" name="state"><br>
+<form action="{{.RequestUri}}" method="get">
+               <input type="hidden" name="client_id" value="{{.ClientId}}">
+               <input type="hidden" name="redirect_uri" value="{{.RefererUri}}"> 
+               <input type="hidden" name="response_type" value="code"> 
+    Event URL: <input type="text"   name="state"><br>
+               <input type="submit"                  value="Send"> 
 </form>
