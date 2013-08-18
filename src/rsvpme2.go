@@ -9,10 +9,14 @@ import (
   "bytes"
     "html/template"
     "io"
+    "io/ioutil"
     "net/http"
     "net/url"
     "time"
     "container/list"
+    "encoding/json"
+    "regexp"
+    "strconv"
 )
 
 type HomePage struct {
@@ -28,10 +32,17 @@ type WeGotItPage struct {
 type RsvpRequest struct {
     RequestTime     time.Time
     TokenExpireTime time.Time
-    AcccessToken    string
+    AccessToken    string
     RefreshToken    string
-    EventUrl        string
+    EventId        string
     RsvpTime       time.Time
+}
+
+type AuthBlock struct {
+    Token_Type    string "token_type"
+    Refresh_Token string "refresh_token"
+    Access_Token  string "access_token"
+    Expires_In    int    "expires_in"
 }
 
 var templates = template.Must(template.ParseFiles("tmpl/home.html", "tmpl/wegotit.html"))
@@ -47,6 +58,23 @@ func addRootHandler(uri string, refererUri string, clientId string) {
     http.HandleFunc("/", handler)
 }
 
+
+func getEventRsvpTime(eventId string, accessToken string) time.Time {
+    v := url.Values{}
+    v.Set("event_id", eventId)
+    v.Set("access_token", accessToken)
+    eventsStr := fmt.Sprintf(
+        "https://api.meetup.com/2/events/?access_token=%v&event_id=%v&fields=rsvp_rules", 
+        accessToken, eventId)
+    resp, _ := http.Get(eventsStr)
+    defer resp.Body.Close()
+    contents, _ := ioutil.ReadAll(resp.Body)
+    re, _ := regexp.Compile("\"open_time\"\\s*:\\s*([0-9]+)")
+    matches := re.FindSubmatch(contents)
+    t, _ := strconv.ParseInt(string(matches[1]),0, 64)
+    return time.Unix(t/1000,0)
+}
+
 func addAuthHandler(ch chan RsvpRequest, accessUrl string, refererUri string, clientId string, clientSecret string) {
     
     handler := func(w http.ResponseWriter, r *http.Request) {
@@ -59,10 +87,18 @@ func addAuthHandler(ch chan RsvpRequest, accessUrl string, refererUri string, cl
         v.Set("code", code)
         resp, err := http.PostForm(accessUrl, v)
         if (err == nil && resp.StatusCode == http.StatusOK) {
-            buf := new(bytes.Buffer)
-            defer resp.Body.Close()
-            io.Copy(buf, resp.Body)
-            ch <- RsvpRequest{EventUrl: r.URL.Query().Get("state")}
+            var authblock AuthBlock
+            jd := json.NewDecoder(resp.Body)
+            jd.Decode(&authblock)
+            rsvpTime := getEventRsvpTime(r.URL.Query().Get("state"), authblock.Access_Token)
+            ch <- RsvpRequest{
+                   RequestTime: time.Now(),
+                   TokenExpireTime: time.Now().Add(
+                    time.Duration(1000*1000*1000*int64(authblock.Expires_In))),
+                   AccessToken: authblock.Access_Token,
+                   RefreshToken: authblock.Refresh_Token,
+                   RsvpTime: rsvpTime,
+                   EventId: r.URL.Query().Get("state") }
             http.Redirect(w, r, "/wegotit", http.StatusFound)
         } else {
             http.Redirect(w, r, "/fark", http.StatusFound)
@@ -79,25 +115,30 @@ func startWait(waitch chan RsvpRequest, rsvpList *list.List) {
 
     mintime := time.Now()
     nextEvent := rsvpList.Front()
-
     for e := rsvpList.Front(); e != nil; e = e.Next() {
         rsvp := e.Value.(RsvpRequest)
+        fmt.Println(rsvp)
         if mintime.Before(rsvp.RsvpTime) {
             mintime = rsvp.RsvpTime
             nextEvent = e
         }
     }
     
-    ch := time.After(mintime.Sub(time.Now()))
-    select {
-        case <- ch:
+    if nextEvent != nil {
+        fmt.Println("waiting")
+        fmt.Println(mintime.Sub(time.Now()))
+        select {
+            case <- time.After(mintime.Sub(time.Now())):
+        }
+        waitch <- nextEvent.Value.(RsvpRequest)
+        fmt.Println(nextEvent)
+        rsvpList.Remove(nextEvent)
     }
-    waitch <- nextEvent.Value.(RsvpRequest)
-    fmt.Println(nextEvent)
-    rsvpList.Remove(nextEvent)
 }
 
 func rsvpToEvent(event RsvpRequest) {
+    fmt.Println("got event")
+    fmt.Println(event)
 }
 
 func rsvpTask(ch chan RsvpRequest) {
@@ -108,6 +149,7 @@ func rsvpTask(ch chan RsvpRequest) {
     for {
         select {
             case rsvp := <-ch: {
+                rsvp.RsvpTime = rsvp.RsvpTime.Add(1000*1000*1000*1000)
                 rsvpList.PushBack(rsvp)
             }
             case event := <- waitch: {
@@ -122,6 +164,7 @@ func rsvpTask(ch chan RsvpRequest) {
 func main() {
     fmt.Println("starting")
     clientId      := "1q436aibkm3lpb5daoioul87tk"
+    clientSecret  := "pj1gksajgksruc39gjh81udebt"
     redirectUri   := "http://127.0.0.1:8080/authed/"
     authorizeUrl  := "https://secure.meetup.com/oauth2/authorize"
     accessUrl   := "https://secure.meetup.com/oauth2/access"
